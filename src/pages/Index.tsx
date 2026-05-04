@@ -276,24 +276,106 @@ function DomainsPage({ query, setQuery, user, setPage, purchasedDomains, buyDoma
   );
 }
 
+// ─── Auth Modal for VDS ───────────────────────────────────────────────────────
+function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [tab, setTab] = useState<"login" | "register">("login");
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [error, setError] = useState("");
+
+  const handleLogin = () => {
+    const stored = localStorage.getItem("spaceru_user");
+    if (!stored) { setError("Аккаунт не найден. Зарегистрируйтесь."); return; }
+    const u: User = JSON.parse(stored);
+    if (u.email === form.email && u.password === form.password) { onSuccess(); }
+    else setError("Неверный email или пароль");
+  };
+
+  const handleRegister = () => {
+    if (!form.name || !form.email || !form.password) { setError("Заполните все поля"); return; }
+    if (form.password.length < 6) { setError("Пароль минимум 6 символов"); return; }
+    const u: User = { name: form.name, email: form.email, password: form.password };
+    localStorage.setItem("spaceru_user", JSON.stringify(u));
+    onSuccess();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+      <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-8 shadow-2xl w-full max-w-sm mx-4 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-black text-[hsl(var(--primary))]">Для покупки VDS войдите в аккаунт</h3>
+          <button onClick={onClose} className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">
+            <Icon name="X" size={20} />
+          </button>
+        </div>
+        <div className="flex bg-[hsl(var(--muted))] rounded-xl p-1 mb-4">
+          {(["login", "register"] as const).map((t) => (
+            <button key={t} onClick={() => { setTab(t); setError(""); }}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${tab === t ? "bg-white text-[hsl(var(--primary))] shadow-sm" : "text-[hsl(var(--muted-foreground))]"}`}>
+              {t === "login" ? "Войти" : "Регистрация"}
+            </button>
+          ))}
+        </div>
+        <div className="space-y-3">
+          {tab === "register" && (
+            <input type="text" placeholder="Ваше имя" value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full px-4 py-3 rounded-xl border border-[hsl(var(--border))] outline-none text-sm" />
+          )}
+          <input type="email" placeholder="Email" value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            className="w-full px-4 py-3 rounded-xl border border-[hsl(var(--border))] outline-none text-sm" />
+          <input type="password" placeholder="Пароль" value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && (tab === "login" ? handleLogin() : handleRegister())}
+            className="w-full px-4 py-3 rounded-xl border border-[hsl(var(--border))] outline-none text-sm" />
+        </div>
+        {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+        <button onClick={tab === "login" ? handleLogin : handleRegister}
+          className="w-full mt-4 py-3 rounded-xl text-white font-bold text-sm hover:opacity-90 transition-opacity"
+          style={{ backgroundColor: "hsl(var(--primary))" }}>
+          {tab === "login" ? "Войти и купить" : "Создать аккаунт и купить"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── VDS Page ─────────────────────────────────────────────────────────────────
-function VdsPage({ user, setPage, buyVds, purchasedVds }: {
+function VdsPage({ user, setUser, setPage, buyVds, purchasedVds }: {
   user: User | null;
+  setUser: (u: User) => void;
   setPage: (p: Page) => void;
   buyVds: (plan: typeof VDS_PLANS[0]) => void;
   purchasedVds: VdsServer[];
 }) {
+  const [authModal, setAuthModal] = useState<typeof VDS_PLANS[0] | null>(null);
+
+  const handleBuy = (plan: typeof VDS_PLANS[0]) => {
+    if (!user) { setAuthModal(plan); return; }
+    buyVds(plan);
+  };
+
+  const handleAuthSuccess = () => {
+    const stored = localStorage.getItem("spaceru_user");
+    if (stored && authModal) {
+      setUser(JSON.parse(stored));
+      localStorage.setItem("spaceru_loggedin", "1");
+      setAuthModal(null);
+      buyVds(authModal);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-12">
+      {authModal && <AuthModal onClose={() => setAuthModal(null)} onSuccess={handleAuthSuccess} />}
       <h2 className="text-3xl font-black text-[hsl(var(--primary))] mb-2">Виртуальные серверы VDS</h2>
       <p className="text-[hsl(var(--muted-foreground))] mb-10">Мощные серверы с процессором AMD RYZEN 5 и SSD-дисками</p>
       <div className="grid md:grid-cols-3 gap-6 mb-12">
         {VDS_PLANS.map((plan, i) => {
           const bought = purchasedVds.find((v) => v.plan === plan.id);
           return (
-            <div
-              key={plan.id}
-              className={`card-hover bg-white rounded-2xl border p-6 flex flex-col ${
+            <div key={plan.id}
+              className={`card-hover bg-white rounded-2xl border p-6 flex flex-col stagger-${i + 1} animate-fade-in ${
                 plan.badge === "Популярный" ? "border-blue-300 accent-glow" : "border-[hsl(var(--border))]"
               }`}
             >
@@ -306,37 +388,22 @@ function VdsPage({ user, setPage, buyVds, purchasedVds }: {
               )}
               <h3 className="text-xl font-black text-[hsl(var(--primary))] mb-1">{plan.name}</h3>
               <div className="text-3xl font-black text-[hsl(var(--foreground))] mb-1">
-                {plan.price} ₽
-                <span className="text-sm font-medium text-[hsl(var(--muted-foreground))]">/мес</span>
+                {plan.price} ₽<span className="text-sm font-medium text-[hsl(var(--muted-foreground))]">/мес</span>
               </div>
               <div className="border-t border-[hsl(var(--border))] my-4"></div>
               <ul className="space-y-3 mb-6 flex-1">
-                <li className="flex items-center gap-2 text-sm">
-                  <Icon name="Cpu" size={16} className="text-blue-500 shrink-0" />
-                  <span className="font-medium">{plan.cpu}</span>
-                </li>
-                <li className="flex items-center gap-2 text-sm">
-                  <Icon name="MemoryStick" size={16} className="text-blue-500 shrink-0" />
-                  <span className="font-medium">ОЗУ: {plan.ram}</span>
-                </li>
-                <li className="flex items-center gap-2 text-sm">
-                  <Icon name="HardDrive" size={16} className="text-blue-500 shrink-0" />
-                  <span className="font-medium">Диск: {plan.disk}</span>
-                </li>
+                <li className="flex items-center gap-2 text-sm"><Icon name="Cpu" size={16} className="text-blue-500 shrink-0" /><span className="font-medium">{plan.cpu}</span></li>
+                <li className="flex items-center gap-2 text-sm"><Icon name="MemoryStick" size={16} className="text-blue-500 shrink-0" /><span className="font-medium">ОЗУ: {plan.ram}</span></li>
+                <li className="flex items-center gap-2 text-sm"><Icon name="HardDrive" size={16} className="text-blue-500 shrink-0" /><span className="font-medium">Диск: {plan.disk}</span></li>
               </ul>
               {bought ? (
-                <button
-                  onClick={() => setPage("cabinet")}
-                  className="w-full py-3 rounded-xl bg-green-50 text-green-700 font-bold text-sm border border-green-200 hover:bg-green-100 transition-colors"
-                >
+                <button onClick={() => setPage("cabinet")} className="w-full py-3 rounded-xl bg-green-50 text-green-700 font-bold text-sm border border-green-200 hover:bg-green-100 transition-colors">
                   ✓ Купленный VDS
                 </button>
               ) : (
-                <button
-                  onClick={() => { if (!user) { setPage("cabinet"); return; } buyVds(plan); }}
+                <button onClick={() => handleBuy(plan)}
                   className="w-full py-3 rounded-xl text-white font-bold text-sm transition-opacity hover:opacity-90"
-                  style={{ backgroundColor: "hsl(var(--primary))" }}
-                >
+                  style={{ backgroundColor: "hsl(var(--primary))" }}>
                   Подключить за {plan.price} ₽/мес
                 </button>
               )}
@@ -349,12 +416,63 @@ function VdsPage({ user, setPage, buyVds, purchasedVds }: {
           <h3 className="text-xl font-black mb-1">Нужна помощь с выбором?</h3>
           <p className="text-white/70 text-sm">Наши специалисты подберут оптимальный тариф</p>
         </div>
-        <button
-          onClick={() => setPage("support")}
-          className="px-6 py-3 bg-white text-[hsl(var(--primary))] rounded-xl font-bold text-sm hover:opacity-90 transition-opacity shrink-0"
-        >
+        <button onClick={() => setPage("support")} className="px-6 py-3 bg-white text-[hsl(var(--primary))] rounded-xl font-bold text-sm hover:opacity-90 transition-opacity shrink-0">
           Связаться с нами
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sparkline Chart ──────────────────────────────────────────────────────────
+function SparkLine({ data, color = "#3b82f6", maxVal, unit, tooltip }: {
+  data: number[];
+  color?: string;
+  maxVal: number;
+  unit: string;
+  tooltip?: { time: string; value: number } | null;
+}) {
+  const W = 600; const H = 80; const PAD = 4;
+  const pts = data.map((v, i) => {
+    const x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
+    const y = H - PAD - (v / maxVal) * (H - PAD * 2);
+    return `${x},${y}`;
+  }).join(" ");
+  const area = `M${PAD},${H - PAD} ` + data.map((v, i) => {
+    const x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
+    const y = H - PAD - (v / maxVal) * (H - PAD * 2);
+    return `L${x},${y}`;
+  }).join(" ") + ` L${W - PAD},${H - PAD} Z`;
+
+  const lastVal = data[data.length - 1];
+
+  return (
+    <div className="relative">
+      <div className="flex items-end justify-between mb-1">
+        <span className="text-xs text-[hsl(var(--muted-foreground))]">{maxVal} {unit}</span>
+        <span className="text-xs font-mono-code font-bold" style={{ color }}>{lastVal.toFixed(1)} {unit}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 80 }}>
+        <defs>
+          <linearGradient id={`grad-${color.replace("#","")}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill={`url(#grad-${color.replace("#","")})`} />
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+        {tooltip && (
+          <g>
+            <circle
+              cx={PAD + ((data.length - 1) / (data.length - 1)) * (W - PAD * 2)}
+              cy={H - PAD - (tooltip.value / maxVal) * (H - PAD * 2)}
+              r="3" fill={color}
+            />
+          </g>
+        )}
+      </svg>
+      <div className="flex justify-between text-[10px] text-[hsl(var(--muted-foreground))] mt-1 font-mono-code">
+        <span>-24ч</span><span>-12ч</span><span>сейчас</span>
       </div>
     </div>
   );
@@ -370,149 +488,275 @@ function VdsPanel({ server, onBack, onReinstall }: {
   const [selectedOs, setSelectedOs] = useState(server.os);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
   const [status, setStatus] = useState(server.status);
-  const cpuLoad = server.cpu;
-  const diskUsed = server.disk;
+  const [activeTab, setActiveTab] = useState<"stats" | "ip" | "history" | "config">("stats");
   const planInfo = VDS_PLANS.find((p) => p.id === server.plan);
+
+  const genHistory = (base: number, noise: number, len = 60) =>
+    Array.from({ length: len }, (_, i) => {
+      const spike = (i === 38 || i === 55) ? base * 3 : 0;
+      return Math.max(0, base + (Math.random() - 0.5) * noise + spike);
+    });
+
+  const [cpuData, setCpuData] = useState(() => genHistory(4, 6));
+  const [ramData, setRamData] = useState(() => genHistory(15, 8));
+  const [diskData, setDiskData] = useState(() => genHistory(8, 15));
+  const [netInData, setNetInData] = useState(() => genHistory(12, 20));
+  const [netOutData, setNetOutData] = useState(() => genHistory(6, 10));
+  const [iopsData, setIopsData] = useState(() => genHistory(30, 80));
+
+  const ramTotal = planInfo?.ram === "4 ГБ" ? 4 : planInfo?.ram === "8 ГБ" ? 8 : 32;
+  const diskTotal = planInfo?.disk === "128 ГБ" ? 128 : planInfo?.disk === "256 ГБ" ? 256 : 512;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const push = (arr: number[], base: number, noise: number) =>
+        [...arr.slice(1), Math.max(0, base + (Math.random() - 0.5) * noise)];
+      setCpuData((d) => push(d, 4, 6));
+      setRamData((d) => push(d, 15, 8));
+      setDiskData((d) => push(d, 8, 15));
+      setNetInData((d) => push(d, 12, 20));
+      setNetOutData((d) => push(d, 6, 10));
+      setIopsData((d) => push(d, 30, 80));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleRestart = () => {
     setStatus("stopped");
-    setTimeout(() => setStatus("running"), 2000);
+    setTimeout(() => setStatus("running"), 2500);
   };
 
+  const historyEvents = [
+    { date: "04.05.2025 07:00", event: "Пиковая нагрузка CPU — 87%" },
+    { date: "03.05.2025 18:30", event: "Перезагрузка сервера" },
+    { date: "02.05.2025 12:10", event: "Сервер запущен" },
+    { date: "01.05.2025 09:00", event: "Покупка VDS — тариф " + planInfo?.name },
+  ];
+
+  const tabs = [
+    { id: "stats", label: "Статистика", icon: "BarChart2" },
+    { id: "ip", label: "IP-адреса", icon: "Monitor" },
+    { id: "history", label: "История", icon: "Clock" },
+    { id: "config", label: "ОС/Конфигурация", icon: "Settings" },
+  ] as const;
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 py-10 animate-fade-in">
       <button onClick={onBack} className="flex items-center gap-2 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] mb-6 transition-colors text-sm font-medium">
-        <Icon name="ArrowLeft" size={16} />
-        Назад
+        <Icon name="ArrowLeft" size={16} /> Назад
       </button>
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: "hsl(var(--primary))" }}>
+
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-4 mb-6">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: "hsl(var(--primary))" }}>
           <Icon name="Server" size={24} className="text-white" />
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="text-2xl font-black text-[hsl(var(--primary))]">VDS — {planInfo?.name}</h2>
           <div className="flex items-center gap-2 mt-1">
-            <span className={`w-2 h-2 rounded-full ${status === "running" ? "bg-green-400" : "bg-red-400"}`}></span>
-            <span className="text-sm text-[hsl(var(--muted-foreground))]">
-              {status === "running" ? "Работает" : "Перезагрузка..."}
-            </span>
+            <span className={`w-2 h-2 rounded-full ${status === "running" ? "bg-green-400" : "bg-orange-400 animate-pulse"}`}></span>
+            <span className="text-sm text-[hsl(var(--muted-foreground))]">{status === "running" ? "Работает" : "Перезагрузка..."}</span>
           </div>
         </div>
-        <div className="ml-auto flex gap-2">
-          <button
-            onClick={handleRestart}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[hsl(var(--border))] text-sm font-medium hover:bg-[hsl(var(--muted))] transition-colors"
-          >
-            <Icon name="RotateCcw" size={14} />
-            Рестарт
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={handleRestart} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[hsl(var(--border))] text-sm font-medium hover:bg-[hsl(var(--muted))] transition-colors">
+            <Icon name="RotateCcw" size={13} /> Рестарт
           </button>
-          <button
-            onClick={handleRestart}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[hsl(var(--border))] text-sm font-medium hover:bg-[hsl(var(--muted))] transition-colors"
-          >
-            <Icon name="RefreshCw" size={14} />
-            Перезагрузить
+          <button onClick={handleRestart} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[hsl(var(--border))] text-sm font-medium hover:bg-[hsl(var(--muted))] transition-colors">
+            <Icon name="RefreshCw" size={13} /> Перезагрузить
           </button>
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-5">
-          <div className="flex items-center gap-2 mb-3 text-[hsl(var(--muted-foreground))] text-xs font-semibold uppercase tracking-wider">
-            <Icon name="Cpu" size={14} />
-            CPU Нагрузка
-          </div>
-          <div className="text-3xl font-black text-[hsl(var(--primary))] mb-2">{cpuLoad}%</div>
-          <div className="w-full bg-[hsl(var(--muted))] rounded-full h-2">
-            <div className="h-2 rounded-full" style={{ width: `${cpuLoad}%`, backgroundColor: "hsl(var(--accent))" }}></div>
-          </div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))] mt-2">{planInfo?.cpu}</div>
-        </div>
-        <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-5">
-          <div className="flex items-center gap-2 mb-3 text-[hsl(var(--muted-foreground))] text-xs font-semibold uppercase tracking-wider">
-            <Icon name="HardDrive" size={14} />
-            Диск
-          </div>
-          <div className="text-3xl font-black text-[hsl(var(--primary))] mb-2">{diskUsed}%</div>
-          <div className="w-full bg-[hsl(var(--muted))] rounded-full h-2">
-            <div className="h-2 rounded-full" style={{ width: `${diskUsed}%`, backgroundColor: "hsl(var(--accent))" }}></div>
-          </div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))] mt-2">{planInfo?.disk} SSD</div>
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-[hsl(var(--muted))] rounded-xl p-1 mb-6 overflow-x-auto">
+        {tabs.map((t) => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap ${
+              activeTab === t.id ? "bg-white text-[hsl(var(--primary))] shadow-sm" : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+            }`}>
+            <Icon name={t.icon} size={14} />
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-5">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-3">Подключение</div>
-          <div className="space-y-3">
-            <div>
-              <div className="text-xs text-[hsl(var(--muted-foreground))] mb-1">IP адрес</div>
-              <div className="font-mono-code font-bold text-[hsl(var(--primary))] text-base">{server.ip}</div>
+      {/* ── Stats Tab ── */}
+      {activeTab === "stats" && (
+        <div className="space-y-0 bg-white rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
+          {/* vCPU */}
+          <div className="px-6 py-5 border-b border-[hsl(var(--border))]">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h3 className="font-bold text-[hsl(var(--foreground))]">vCPU</h3>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">100%</span>
             </div>
-            <div>
-              <div className="text-xs text-[hsl(var(--muted-foreground))] mb-1">Порт SSH</div>
-              <div className="font-mono-code font-bold text-[hsl(var(--primary))] text-base">{server.port}</div>
+            <SparkLine data={cpuData} color="#3b82f6" maxVal={100} unit="%" />
+          </div>
+          {/* RAM */}
+          <div className="px-6 py-5 border-b border-[hsl(var(--border))]">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h3 className="font-bold text-[hsl(var(--foreground))]">RAM</h3>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">{ramTotal} ГБ</span>
+            </div>
+            <SparkLine data={ramData} color="#8b5cf6" maxVal={100} unit="%" />
+          </div>
+          {/* Storage */}
+          <div className="px-6 py-5 border-b border-[hsl(var(--border))]">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h3 className="font-bold text-[hsl(var(--foreground))]">Storage</h3>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">{diskTotal} ГБ</span>
+            </div>
+            <SparkLine data={diskData} color="#10b981" maxVal={100} unit="%" />
+          </div>
+          {/* Network */}
+          <div className="px-6 py-5 border-b border-[hsl(var(--border))]">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h3 className="font-bold text-[hsl(var(--foreground))]">Сеть — входящий</h3>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">Мбит/с</span>
+            </div>
+            <SparkLine data={netInData} color="#f59e0b" maxVal={100} unit="Мбит/с" />
+          </div>
+          <div className="px-6 py-5 border-b border-[hsl(var(--border))]">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h3 className="font-bold text-[hsl(var(--foreground))]">Сеть — исходящий</h3>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">Мбит/с</span>
+            </div>
+            <SparkLine data={netOutData} color="#06b6d4" maxVal={100} unit="Мбит/с" />
+          </div>
+          {/* IOPS */}
+          <div className="px-6 py-5">
+            <div className="flex items-baseline gap-3 mb-3">
+              <h3 className="font-bold text-[hsl(var(--foreground))]">Операции ввода-вывода</h3>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">246 IOPS</span>
+            </div>
+            <SparkLine data={iopsData} color="#ef4444" maxVal={500} unit="IOPS" />
+          </div>
+        </div>
+      )}
+
+      {/* ── IP Tab ── */}
+      {activeTab === "ip" && (
+        <div className="bg-white rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
+          <div className="px-6 py-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 flex items-center gap-2">
+            <Icon name="Monitor" size={16} className="text-blue-500" />
+            <h3 className="font-black text-[hsl(var(--primary))]">IP-адреса</h3>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between p-4 bg-[hsl(var(--muted))]/40 rounded-xl">
+              <div>
+                <div className="text-xs text-[hsl(var(--muted-foreground))] mb-1">IPv4 (основной)</div>
+                <div className="font-mono-code font-bold text-[hsl(var(--primary))] text-lg">{server.ip}</div>
+                <div className="text-xs text-[hsl(var(--muted-foreground))] mt-1">SSH порт: {server.port}</div>
+              </div>
+              <span className="flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Активен
+              </span>
+            </div>
+            <div className="flex items-center justify-between p-4 bg-[hsl(var(--muted))]/40 rounded-xl">
+              <div>
+                <div className="text-xs text-[hsl(var(--muted-foreground))] mb-1">IPv6</div>
+                <div className="font-mono-code font-bold text-[hsl(var(--primary))] text-sm">2a02:6b8:c0e::{server.ip.split(".").pop()}:1</div>
+              </div>
+              <span className="flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Активен
+              </span>
+            </div>
+            <div className="border-t border-[hsl(var(--border))] pt-4">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-3">Пароль root</div>
+              <div className="flex items-center gap-2 bg-[hsl(var(--muted))] rounded-xl px-4 py-3">
+                <span className="font-mono-code text-sm flex-1 text-[hsl(var(--foreground))] break-all">
+                  {showPass ? server.password : "••••••••••••••••"}
+                </span>
+                <button onClick={() => setShowPass(!showPass)} className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] shrink-0">
+                  <Icon name={showPass ? "EyeOff" : "Eye"} size={16} />
+                </button>
+              </div>
+              <div className="text-xs text-[hsl(var(--muted-foreground))] mt-2">Пользователь: root</div>
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-5">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-3">Пароль root</div>
-          <div className="flex items-center gap-2 bg-[hsl(var(--muted))] rounded-xl px-3 py-2">
-            <span className="font-mono-code text-sm flex-1 text-[hsl(var(--foreground))] break-all">
-              {showPass ? server.password : "••••••••••••••••"}
-            </span>
-            <button onClick={() => setShowPass(!showPass)} className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors shrink-0">
-              <Icon name={showPass ? "EyeOff" : "Eye"} size={16} />
-            </button>
-          </div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))] mt-2">Пользователь: root</div>
-        </div>
-      </div>
+      )}
 
-      <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-5">
-        <div className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-4">Переустановка ОС</div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-          {OS_OPTIONS.map((os) => (
-            <button
-              key={os.id}
-              onClick={() => setSelectedOs(os.id)}
-              className={`p-3 rounded-xl border text-sm font-medium transition-colors text-left ${
-                selectedOs === os.id
-                  ? "border-blue-400 bg-blue-50 text-[hsl(var(--primary))]"
-                  : "border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
-              }`}
-            >
-              <div className="text-lg mb-1">🐧</div>
-              <div className="text-xs leading-tight">{os.label}</div>
-            </button>
-          ))}
-        </div>
-        {!confirmReinstall ? (
-          <button
-            onClick={() => setConfirmReinstall(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-medium hover:bg-red-100 transition-colors"
-          >
-            <Icon name="Trash2" size={14} />
-            Переустановить систему
-          </button>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm text-red-600 font-medium">Все данные будут удалены. Продолжить?</span>
-            <button
-              onClick={() => { onReinstall(selectedOs); setConfirmReinstall(false); }}
-              className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold hover:opacity-90"
-            >
-              Да, переустановить
-            </button>
-            <button
-              onClick={() => setConfirmReinstall(false)}
-              className="px-4 py-2 rounded-xl border border-[hsl(var(--border))] text-sm font-medium hover:bg-[hsl(var(--muted))]"
-            >
-              Отмена
-            </button>
+      {/* ── History Tab ── */}
+      {activeTab === "history" && (
+        <div className="bg-white rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
+          <div className="px-6 py-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 flex items-center gap-2">
+            <Icon name="Clock" size={16} className="text-blue-500" />
+            <h3 className="font-black text-[hsl(var(--primary))]">История событий</h3>
           </div>
-        )}
-      </div>
+          <div className="divide-y divide-[hsl(var(--border))]">
+            {historyEvents.map((ev, i) => (
+              <div key={i} className="flex items-start gap-4 px-6 py-4">
+                <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 shrink-0"></div>
+                <div>
+                  <div className="font-medium text-[hsl(var(--foreground))] text-sm">{ev.event}</div>
+                  <div className="text-xs text-[hsl(var(--muted-foreground))] font-mono-code mt-0.5">{ev.date}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Config Tab ── */}
+      {activeTab === "config" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-6">
+            <h3 className="font-black text-[hsl(var(--primary))] mb-4">Конфигурация</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {[
+                { label: "Процессор", val: planInfo?.cpu || "AMD RYZEN 5", icon: "Cpu" },
+                { label: "ОЗУ", val: planInfo?.ram || "—", icon: "MemoryStick" },
+                { label: "Диск", val: planInfo?.disk || "—", icon: "HardDrive" },
+                { label: "Сеть", val: "1 Гбит/с", icon: "Wifi" },
+                { label: "Тариф", val: planInfo?.name || "—", icon: "Package" },
+                { label: "Дата создания", val: "01.05.2025", icon: "Calendar" },
+              ].map((item) => (
+                <div key={item.label} className="bg-[hsl(var(--muted))]/40 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Icon name={item.icon} size={14} className="text-blue-500" />
+                    <span className="text-xs text-[hsl(var(--muted-foreground))] font-medium">{item.label}</span>
+                  </div>
+                  <div className="font-bold text-[hsl(var(--primary))] text-sm">{item.val}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-6">
+            <h3 className="font-black text-[hsl(var(--primary))] mb-4">Переустановка ОС</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+              {OS_OPTIONS.map((os) => (
+                <button key={os.id} onClick={() => setSelectedOs(os.id)}
+                  className={`p-3 rounded-xl border text-sm font-medium transition-colors text-left ${
+                    selectedOs === os.id ? "border-blue-400 bg-blue-50 text-[hsl(var(--primary))]" : "border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
+                  }`}>
+                  <div className="text-lg mb-1">🐧</div>
+                  <div className="text-xs leading-tight">{os.label}</div>
+                </button>
+              ))}
+            </div>
+            {!confirmReinstall ? (
+              <button onClick={() => setConfirmReinstall(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-medium hover:bg-red-100 transition-colors">
+                <Icon name="Trash2" size={14} /> Переустановить систему
+              </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-red-600 font-medium">Все данные будут удалены. Продолжить?</span>
+                <button onClick={() => { onReinstall(selectedOs); setConfirmReinstall(false); }}
+                  className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold hover:opacity-90">
+                  Да, переустановить
+                </button>
+                <button onClick={() => setConfirmReinstall(false)}
+                  className="px-4 py-2 rounded-xl border border-[hsl(var(--border))] text-sm font-medium hover:bg-[hsl(var(--muted))]">
+                  Отмена
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -929,7 +1173,7 @@ export default function Index() {
         />
       )}
       {page === "vds" && (
-        <VdsPage user={user} setPage={setPage} buyVds={buyVds} purchasedVds={purchasedVds} />
+        <VdsPage user={user} setUser={(u) => handleSetUser(u)} setPage={setPage} buyVds={buyVds} purchasedVds={purchasedVds} />
       )}
       {page === "vds-panel" && activeVds && (
         <VdsPanel server={activeVds} onBack={() => setPage("cabinet")} onReinstall={handleReinstall} />
