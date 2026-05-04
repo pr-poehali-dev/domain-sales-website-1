@@ -11,6 +11,9 @@ interface User {
 interface PurchasedDomain {
   name: string;
   expires: string;
+  status: "activating" | "active";
+  activatesAt: number;
+  linkedIp?: string;
 }
 
 interface VdsServer {
@@ -196,6 +199,7 @@ function DomainsPage({ query, setQuery, user, setPage, purchasedDomains, buyDoma
 }) {
   const [input, setInput] = useState(query);
   const [searched, setSearched] = useState(!!query);
+  const [buying, setBuying] = useState<Record<string, number>>({});
 
   useEffect(() => { setInput(query); setSearched(!!query); }, [query]);
 
@@ -205,6 +209,22 @@ function DomainsPage({ query, setQuery, user, setPage, purchasedDomains, buyDoma
   };
 
   const ownedNames = purchasedDomains.map((d) => d.name);
+
+  const handleBuy = (fullName: string, price: number) => {
+    if (!user) { setPage("cabinet"); return; }
+    if (buying[fullName] !== undefined) return;
+    setBuying((prev) => ({ ...prev, [fullName]: 0 }));
+    const start = Date.now();
+    const tick = setInterval(() => {
+      const pct = Math.min(100, Math.round(((Date.now() - start) / 4000) * 100));
+      setBuying((prev) => ({ ...prev, [fullName]: pct }));
+      if (pct >= 100) {
+        clearInterval(tick);
+        setBuying((prev) => { const n = { ...prev }; delete n[fullName]; return n; });
+        buyDomain(fullName, price);
+      }
+    }, 80);
+  };
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12">
@@ -221,11 +241,9 @@ function DomainsPage({ query, setQuery, user, setPage, purchasedDomains, buyDoma
           onKeyDown={(e) => e.key === "Enter" && handle()}
           className="flex-1 px-3 py-4 outline-none text-base text-gray-800 bg-transparent font-medium"
         />
-        <button
-          onClick={handle}
+        <button onClick={handle}
           className="px-6 py-4 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
-          style={{ backgroundColor: "hsl(var(--primary))" }}
-        >
+          style={{ backgroundColor: "hsl(var(--primary))" }}>
           Подобрать
         </button>
       </div>
@@ -236,30 +254,47 @@ function DomainsPage({ query, setQuery, user, setPage, purchasedDomains, buyDoma
             <span className="text-sm text-[hsl(var(--muted-foreground))]">Результаты для</span>
             <span className="ml-2 font-mono-code font-bold text-[hsl(var(--primary))] text-base">«{query}»</span>
           </div>
-          {EXTENSIONS.map((item, i) => {
+          {EXTENSIONS.map((item) => {
             const fullName = `${query}${item.ext}`;
             const owned = ownedNames.includes(fullName);
+            const progress = buying[fullName];
+            const isBuying = progress !== undefined;
             return (
-              <div key={item.ext} className="domain-row flex items-center justify-between px-6 py-4 border-b border-[hsl(var(--border))]/50 last:border-0">
-                <div className="flex items-center gap-3">
-                  <span className="w-2 h-2 rounded-full bg-green-400"></span>
-                  <span className="font-mono-code font-bold text-[hsl(var(--primary))] text-lg">{fullName}</span>
-                  <span className="text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium">свободен</span>
+              <div key={item.ext} className="domain-row px-6 py-4 border-b border-[hsl(var(--border))]/50 last:border-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-green-400"></span>
+                    <span className="font-mono-code font-bold text-[hsl(var(--primary))] text-lg">{fullName}</span>
+                    {!owned && !isBuying && <span className="text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium">свободен</span>}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="font-bold text-[hsl(var(--foreground))]">{item.price} ₽/год</span>
+                    {owned ? (
+                      <span className="px-4 py-2 rounded-xl bg-gray-100 text-gray-500 text-sm font-medium">Куплен</span>
+                    ) : isBuying ? (
+                      <span className="px-4 py-2 rounded-xl bg-blue-50 text-blue-600 text-sm font-medium min-w-[100px] text-center">{progress}%</span>
+                    ) : (
+                      <button onClick={() => handleBuy(fullName, item.price)}
+                        className="px-4 py-2 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                        style={{ backgroundColor: "hsl(var(--accent))" }}>
+                        Приобрести
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="font-bold text-[hsl(var(--foreground))] text-lg">{item.price} ₽/год</span>
-                  {owned ? (
-                    <span className="px-4 py-2 rounded-xl bg-gray-100 text-gray-500 text-sm font-medium">Куплен</span>
-                  ) : (
-                    <button
-                      onClick={() => { if (!user) { setPage("cabinet"); return; } buyDomain(fullName, item.price); }}
-                      className="px-4 py-2 rounded-xl text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-                      style={{ backgroundColor: "hsl(var(--accent))" }}
-                    >
-                      Приобрести
-                    </button>
-                  )}
-                </div>
+                {isBuying && (
+                  <div className="mt-2">
+                    <div className="w-full bg-blue-100 rounded-full h-1.5">
+                      <div className="h-1.5 rounded-full bg-blue-500 transition-all duration-75"
+                        style={{ width: `${progress}%` }}></div>
+                    </div>
+                    <div className="text-xs text-blue-500 mt-1">
+                      {progress < 40 && "Резервирование домена..."}
+                      {progress >= 40 && progress < 80 && "Оформление заказа..."}
+                      {progress >= 80 && "Финализация..."}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -834,17 +869,20 @@ function VdsPanel({ server, onBack, onReinstall }: {
 }
 
 // ─── Cabinet ──────────────────────────────────────────────────────────────────
-function CabinetPage({ user, setUser, setPage, purchasedDomains, purchasedVds, setActiveVds }: {
+function CabinetPage({ user, setUser, setPage, purchasedDomains, purchasedVds, setActiveVds, linkDomainIp }: {
   user: User | null;
   setUser: (u: User | null) => void;
   setPage: (p: Page) => void;
   purchasedDomains: PurchasedDomain[];
   purchasedVds: VdsServer[];
   setActiveVds: (v: VdsServer) => void;
+  linkDomainIp: (name: string, ip: string) => void;
 }) {
   const [tab, setTab] = useState<"login" | "register">("login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
+  const [linkModal, setLinkModal] = useState<string | null>(null);
+  const [linkIpInput, setLinkIpInput] = useState("");
 
   const handleLogin = () => {
     const stored = localStorage.getItem("spaceru_user");
@@ -859,6 +897,7 @@ function CabinetPage({ user, setUser, setPage, purchasedDomains, purchasedVds, s
     if (form.password.length < 6) { setError("Пароль минимум 6 символов"); return; }
     const u: User = { name: form.name, email: form.email, password: form.password };
     localStorage.setItem("spaceru_user", JSON.stringify(u));
+    localStorage.setItem("spaceru_loggedin", "1");
     setUser(u);
     setError("");
   };
@@ -949,20 +988,94 @@ function CabinetPage({ user, setUser, setPage, purchasedDomains, purchasedVds, s
         </div>
       </div>
 
+      {/* Link IP Modal */}
+      {linkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setLinkModal(null)}>
+          <div className="bg-white rounded-2xl border border-[hsl(var(--border))] p-6 shadow-2xl w-full max-w-sm mx-4 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black text-[hsl(var(--primary))]">Привязать IP-адрес</h3>
+              <button onClick={() => setLinkModal(null)}><Icon name="X" size={18} className="text-[hsl(var(--muted-foreground))]" /></button>
+            </div>
+            <p className="text-sm text-[hsl(var(--muted-foreground))] mb-3">
+              Домен: <span className="font-mono-code font-bold text-[hsl(var(--primary))]">{linkModal}</span>
+            </p>
+            <input
+              type="text"
+              placeholder="Например: 185.12.45.67"
+              value={linkIpInput}
+              onChange={(e) => setLinkIpInput(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-[hsl(var(--border))] outline-none text-sm font-mono-code mb-3"
+            />
+            {purchasedVds.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs text-[hsl(var(--muted-foreground))] mb-2">Или выберите IP вашего VDS:</div>
+                <div className="space-y-1">
+                  {purchasedVds.map((v) => (
+                    <button key={v.id} onClick={() => setLinkIpInput(v.ip)}
+                      className={`w-full text-left px-3 py-2 rounded-lg border text-sm font-mono-code transition-colors ${linkIpInput === v.ip ? "border-blue-400 bg-blue-50 text-[hsl(var(--primary))]" : "border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"}`}>
+                      {v.ip} <span className="text-[hsl(var(--muted-foreground))] font-sans">— VDS {VDS_PLANS.find(p => p.id === v.plan)?.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                if (linkIpInput.trim() && linkModal) {
+                  linkDomainIp(linkModal, linkIpInput.trim());
+                  setLinkModal(null);
+                  setLinkIpInput("");
+                }
+              }}
+              className="w-full py-3 rounded-xl text-white font-bold text-sm hover:opacity-90"
+              style={{ backgroundColor: "hsl(var(--primary))" }}>
+              Привязать
+            </button>
+          </div>
+        </div>
+      )}
+
       {purchasedDomains.length > 0 && (
         <div className="bg-white rounded-2xl border border-[hsl(var(--border))] mb-6 overflow-hidden">
           <div className="px-6 py-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
             <h3 className="font-black text-[hsl(var(--primary))]">Мои домены</h3>
           </div>
-          {purchasedDomains.map((d) => (
-            <div key={d.name} className="flex items-center justify-between px-6 py-4 border-b border-[hsl(var(--border))]/50 last:border-0">
-              <div className="flex items-center gap-3">
-                <span className="w-2 h-2 rounded-full bg-green-400"></span>
-                <span className="font-mono-code font-bold text-[hsl(var(--primary))]">{d.name}</span>
+          {purchasedDomains.map((d) => {
+            const isActivating = d.status === "activating";
+            const remainMs = Math.max(0, d.activatesAt - Date.now());
+            const remainMin = Math.round(remainMs / 60000);
+            const remainSec = Math.round(remainMs / 1000);
+            return (
+              <div key={d.name} className="px-6 py-4 border-b border-[hsl(var(--border))]/50 last:border-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`w-2 h-2 rounded-full ${isActivating ? "bg-orange-400 animate-pulse" : "bg-green-400"}`}></span>
+                    <div>
+                      <span className="font-mono-code font-bold text-[hsl(var(--primary))]">{d.name}</span>
+                      {d.linkedIp && (
+                        <div className="text-xs text-[hsl(var(--muted-foreground))] font-mono-code mt-0.5">→ {d.linkedIp}</div>
+                      )}
+                    </div>
+                    {isActivating ? (
+                      <span className="text-xs px-2 py-0.5 bg-orange-50 text-orange-600 rounded-full font-medium">
+                        {remainMin > 1 ? `~${remainMin} мин` : `~${remainSec} сек`}
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium">Активен</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setLinkModal(d.name); setLinkIpInput(d.linkedIp || ""); }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[hsl(var(--border))] text-xs font-medium hover:bg-[hsl(var(--muted))] transition-colors">
+                      <Icon name="Link" size={12} />
+                      {d.linkedIp ? "Изменить IP" : "Привязать IP"}
+                    </button>
+                    <span className="text-xs text-[hsl(var(--muted-foreground))]">до {d.expires}</span>
+                  </div>
+                </div>
               </div>
-              <span className="text-sm text-[hsl(var(--muted-foreground))]">до {d.expires}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1184,6 +1297,29 @@ export default function Index() {
   });
   const [activeVds, setActiveVds] = useState<VdsServer | null>(null);
 
+  useEffect(() => {
+    purchasedDomains.forEach((d) => {
+      if (d.status === "activating") {
+        const remaining = d.activatesAt - Date.now();
+        if (remaining <= 0) {
+          setPurchasedDomains((prev) => {
+            const updated = prev.map((dom) => dom.name === d.name ? { ...dom, status: "active" as const } : dom);
+            localStorage.setItem("spaceru_domains", JSON.stringify(updated));
+            return updated;
+          });
+        } else {
+          setTimeout(() => {
+            setPurchasedDomains((prev) => {
+              const updated = prev.map((dom) => dom.name === d.name ? { ...dom, status: "active" as const } : dom);
+              localStorage.setItem("spaceru_domains", JSON.stringify(updated));
+              return updated;
+            });
+          }, remaining);
+        }
+      }
+    });
+  }, []);
+
   const handleSetUser = (u: User | null) => {
     setUser(u);
     if (u) localStorage.setItem("spaceru_loggedin", "1");
@@ -1192,10 +1328,34 @@ export default function Index() {
 
   const buyDomain = (name: string, _price: number) => {
     const expYear = new Date().getFullYear() + 1;
-    const d: PurchasedDomain = { name, expires: `01.01.${expYear}` };
+    const fast = Math.random() < 0.7;
+    const delayMs = fast ? 20000 : 3600000;
+    const d: PurchasedDomain = {
+      name,
+      expires: `01.01.${expYear}`,
+      status: "activating",
+      activatesAt: Date.now() + delayMs,
+    };
     const next = [...purchasedDomains, d];
     setPurchasedDomains(next);
     localStorage.setItem("spaceru_domains", JSON.stringify(next));
+    setTimeout(() => {
+      setPurchasedDomains((prev) => {
+        const updated = prev.map((dom) =>
+          dom.name === name ? { ...dom, status: "active" as const } : dom
+        );
+        localStorage.setItem("spaceru_domains", JSON.stringify(updated));
+        return updated;
+      });
+    }, delayMs);
+  };
+
+  const linkDomainIp = (name: string, ip: string) => {
+    setPurchasedDomains((prev) => {
+      const updated = prev.map((d) => d.name === name ? { ...d, linkedIp: ip } : d);
+      localStorage.setItem("spaceru_domains", JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const buyVds = (plan: typeof VDS_PLANS[0]) => {
@@ -1257,6 +1417,7 @@ export default function Index() {
           setPage={setPage}
           purchasedDomains={purchasedDomains}
           purchasedVds={purchasedVds}
+          linkDomainIp={linkDomainIp}
           setActiveVds={setActiveVds}
         />
       )}
