@@ -1,5 +1,38 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+interface Toast { id: number; message: string; type: "success" | "info" | "warning" }
+let _toastId = 0;
+let _addToast: ((t: Omit<Toast, "id">) => void) | null = null;
+function useToastSystem() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const add = useCallback((t: Omit<Toast, "id">) => {
+    const id = ++_toastId;
+    setToasts((prev) => [...prev, { ...t, id }]);
+    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 5000);
+  }, []);
+  useEffect(() => { _addToast = add; return () => { _addToast = null; }; }, [add]);
+  return toasts;
+}
+function ToastContainer({ toasts }: { toasts: Toast[] }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2">
+      {toasts.map((t) => (
+        <div key={t.id} className="flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl border animate-slide-up text-sm font-medium max-w-xs"
+          style={{
+            backgroundColor: t.type === "success" ? "#f0fdf4" : t.type === "warning" ? "#fffbeb" : "#eff6ff",
+            borderColor: t.type === "success" ? "#bbf7d0" : t.type === "warning" ? "#fde68a" : "#bfdbfe",
+            color: t.type === "success" ? "#15803d" : t.type === "warning" ? "#b45309" : "#1d4ed8",
+          }}>
+          <Icon name={t.type === "success" ? "CheckCircle" : t.type === "warning" ? "Clock" : "Info"} size={16} className="shrink-0" />
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface User {
@@ -14,6 +47,9 @@ interface PurchasedDomain {
   status: "activating" | "active";
   activatesAt: number;
   linkedIp?: string;
+  linkStatus?: "linking" | "linked";
+  linkStartedAt?: number;
+  linkDuration?: number;
 }
 
 interface VdsServer {
@@ -868,6 +904,98 @@ function VdsPanel({ server, onBack, onReinstall }: {
   );
 }
 
+// ─── Domain Row ───────────────────────────────────────────────────────────────
+const LINK_STEPS = [
+  { pct: 0, label: "Подключаемся к домену..." },
+  { pct: 20, label: "Проверяем DNS-записи..." },
+  { pct: 40, label: "Обновляем A-запись..." },
+  { pct: 60, label: "Распространяем изменения..." },
+  { pct: 80, label: "Проверяем связь..." },
+  { pct: 95, label: "Финализируем привязку..." },
+];
+
+function DomainRow({ domain: d, onLink }: { domain: PurchasedDomain; onLink: () => void }) {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const isActivating = d.status === "activating";
+  const isLinking = d.linkStatus === "linking";
+  const isLinked = d.linkStatus === "linked";
+
+  const remainActMs = Math.max(0, d.activatesAt - Date.now());
+  const remainActMin = Math.floor(remainActMs / 60000);
+  const remainActSec = Math.floor((remainActMs % 60000) / 1000);
+
+  let linkPct = 0;
+  let linkLabel = "";
+  if (isLinking && d.linkStartedAt && d.linkDuration) {
+    const elapsed = Date.now() - d.linkStartedAt;
+    linkPct = Math.min(99, Math.round((elapsed / d.linkDuration) * 100));
+    const step = [...LINK_STEPS].reverse().find((s) => linkPct >= s.pct);
+    linkLabel = step?.label ?? LINK_STEPS[0].label;
+  }
+
+  void tick;
+
+  return (
+    <div className="px-6 py-4 border-b border-[hsl(var(--border))]/50 last:border-0">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${isActivating ? "bg-orange-400 animate-pulse" : "bg-green-400"}`}></span>
+          <div>
+            <span className="font-mono-code font-bold text-[hsl(var(--primary))]">{d.name}</span>
+            {d.linkedIp && (
+              <div className={`text-xs font-mono-code mt-0.5 ${isLinking ? "text-blue-500" : isLinked ? "text-green-600" : "text-[hsl(var(--muted-foreground))]"}`}>
+                → {d.linkedIp}
+              </div>
+            )}
+          </div>
+          {isActivating ? (
+            <span className="text-xs px-2 py-0.5 bg-orange-50 text-orange-600 rounded-full font-medium">
+              {remainActMin > 0 ? `~${remainActMin}м ${remainActSec}с` : `~${remainActSec}с`}
+            </span>
+          ) : (
+            <span className="text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium">Активен</span>
+          )}
+          {isLinked && (
+            <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium flex items-center gap-1">
+              <Icon name="CheckCircle" size={10} /> IP привязан
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={onLink}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[hsl(var(--border))] text-xs font-medium hover:bg-[hsl(var(--muted))] transition-colors">
+            <Icon name="Link" size={12} />
+            {d.linkedIp ? "Изменить IP" : "Привязать IP"}
+          </button>
+          <span className="text-xs text-[hsl(var(--muted-foreground))]">до {d.expires}</span>
+        </div>
+      </div>
+
+      {isLinking && (
+        <div className="mt-3 bg-blue-50 border border-blue-100 rounded-xl p-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-blue-600 font-medium flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+              {linkLabel}
+            </span>
+            <span className="text-xs font-mono-code text-blue-500">{linkPct}%</span>
+          </div>
+          <div className="w-full bg-blue-100 rounded-full h-1.5">
+            <div className="h-1.5 rounded-full bg-blue-500 transition-all duration-500"
+              style={{ width: `${linkPct}%` }}></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Cabinet ──────────────────────────────────────────────────────────────────
 function CabinetPage({ user, setUser, setPage, purchasedDomains, purchasedVds, setActiveVds, linkDomainIp }: {
   user: User | null;
@@ -1040,42 +1168,13 @@ function CabinetPage({ user, setUser, setPage, purchasedDomains, purchasedVds, s
           <div className="px-6 py-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
             <h3 className="font-black text-[hsl(var(--primary))]">Мои домены</h3>
           </div>
-          {purchasedDomains.map((d) => {
-            const isActivating = d.status === "activating";
-            const remainMs = Math.max(0, d.activatesAt - Date.now());
-            const remainMin = Math.round(remainMs / 60000);
-            const remainSec = Math.round(remainMs / 1000);
-            return (
-              <div key={d.name} className="px-6 py-4 border-b border-[hsl(var(--border))]/50 last:border-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className={`w-2 h-2 rounded-full ${isActivating ? "bg-orange-400 animate-pulse" : "bg-green-400"}`}></span>
-                    <div>
-                      <span className="font-mono-code font-bold text-[hsl(var(--primary))]">{d.name}</span>
-                      {d.linkedIp && (
-                        <div className="text-xs text-[hsl(var(--muted-foreground))] font-mono-code mt-0.5">→ {d.linkedIp}</div>
-                      )}
-                    </div>
-                    {isActivating ? (
-                      <span className="text-xs px-2 py-0.5 bg-orange-50 text-orange-600 rounded-full font-medium">
-                        {remainMin > 1 ? `~${remainMin} мин` : `~${remainSec} сек`}
-                      </span>
-                    ) : (
-                      <span className="text-xs px-2 py-0.5 bg-green-50 text-green-700 rounded-full font-medium">Активен</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => { setLinkModal(d.name); setLinkIpInput(d.linkedIp || ""); }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[hsl(var(--border))] text-xs font-medium hover:bg-[hsl(var(--muted))] transition-colors">
-                      <Icon name="Link" size={12} />
-                      {d.linkedIp ? "Изменить IP" : "Привязать IP"}
-                    </button>
-                    <span className="text-xs text-[hsl(var(--muted-foreground))]">до {d.expires}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {purchasedDomains.map((d) => (
+            <DomainRow
+              key={d.name}
+              domain={d}
+              onLink={() => { setLinkModal(d.name); setLinkIpInput(d.linkedIp || ""); }}
+            />
+          ))}
         </div>
       )}
 
@@ -1279,6 +1378,7 @@ function Footer({ setPage }: { setPage: (p: Page) => void }) {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Index() {
+  const toasts = useToastSystem();
   const [page, setPage] = useState<Page>("home");
   const [domainQuery, setDomainQuery] = useState("");
   const [user, setUser] = useState<User | null>(() => {
@@ -1347,15 +1447,28 @@ export default function Index() {
         localStorage.setItem("spaceru_domains", JSON.stringify(updated));
         return updated;
       });
+      _addToast?.({ type: "success", message: `Домен ${name} активирован! 🎉` });
     }, delayMs);
   };
 
   const linkDomainIp = (name: string, ip: string) => {
+    const dur = Math.random() < 0.5 ? 180000 : 240000;
     setPurchasedDomains((prev) => {
-      const updated = prev.map((d) => d.name === name ? { ...d, linkedIp: ip } : d);
+      const updated = prev.map((d) => d.name === name
+        ? { ...d, linkedIp: ip, linkStatus: "linking" as const, linkStartedAt: Date.now(), linkDuration: dur }
+        : d);
       localStorage.setItem("spaceru_domains", JSON.stringify(updated));
       return updated;
     });
+    _addToast?.({ type: "info", message: `Привязываем ${name} → ${ip}...` });
+    setTimeout(() => {
+      setPurchasedDomains((prev) => {
+        const updated = prev.map((d) => d.name === name ? { ...d, linkStatus: "linked" as const } : d);
+        localStorage.setItem("spaceru_domains", JSON.stringify(updated));
+        return updated;
+      });
+      _addToast?.({ type: "success", message: `${name} успешно привязан к ${ip}!` });
+    }, dur);
   };
 
   const buyVds = (plan: typeof VDS_PLANS[0]) => {
@@ -1386,6 +1499,7 @@ export default function Index() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[hsl(var(--background))]">
+      <ToastContainer toasts={toasts} />
       <Navbar page={page} setPage={setPage} user={user} />
 
       {page === "home" && (
