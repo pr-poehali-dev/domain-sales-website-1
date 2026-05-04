@@ -487,6 +487,9 @@ function VdsPanel({ server, onBack, onReinstall }: {
   const [showPass, setShowPass] = useState(false);
   const [selectedOs, setSelectedOs] = useState(server.os);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
+  const [reinstalling, setReinstalling] = useState(false);
+  const [reinstallProgress, setReinstallProgress] = useState(0);
+  const [reinstallDone, setReinstallDone] = useState(false);
   const [status, setStatus] = useState(server.status);
   const [activeTab, setActiveTab] = useState<"stats" | "ip" | "history" | "config">("stats");
   const planInfo = VDS_PLANS.find((p) => p.id === server.plan);
@@ -524,6 +527,35 @@ function VdsPanel({ server, onBack, onReinstall }: {
   const handleRestart = () => {
     setStatus("stopped");
     setTimeout(() => setStatus("running"), 2500);
+  };
+
+  const handleStartReinstall = () => {
+    setConfirmReinstall(false);
+    setReinstalling(true);
+    setReinstallProgress(0);
+    setReinstallDone(false);
+    setStatus("stopped");
+    const start = Date.now();
+    const DURATION = 10000;
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(100, Math.round((elapsed / DURATION) * 100));
+      setReinstallProgress(pct);
+      if (pct >= 100) {
+        clearInterval(tick);
+        setReinstalling(false);
+        setReinstallDone(true);
+        setStatus("running");
+        onReinstall(selectedOs);
+      }
+    }, 100);
+    (handleStartReinstall as { _timer?: ReturnType<typeof setInterval> })._timer = tick;
+  };
+
+  const handleStopReinstall = () => {
+    setReinstalling(false);
+    setReinstallProgress(0);
+    setStatus("running");
   };
 
   const historyEvents = [
@@ -736,15 +768,55 @@ function VdsPanel({ server, onBack, onReinstall }: {
                 </button>
               ))}
             </div>
-            {!confirmReinstall ? (
+            {reinstalling && (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></span>
+                    <span className="text-sm font-semibold text-orange-700">Переустановка... {reinstallProgress}%</span>
+                  </div>
+                  <button onClick={handleStopReinstall}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100 text-red-600 border border-red-200 text-xs font-bold hover:bg-red-200 transition-colors">
+                    <Icon name="Square" size={12} /> Стоп
+                  </button>
+                </div>
+                <div className="w-full bg-orange-100 rounded-full h-2">
+                  <div className="h-2 rounded-full bg-orange-400 transition-all duration-100"
+                    style={{ width: `${reinstallProgress}%` }}></div>
+                </div>
+                <div className="text-xs text-orange-600 mt-2">
+                  {reinstallProgress < 20 && "Очистка диска..."}
+                  {reinstallProgress >= 20 && reinstallProgress < 50 && "Загрузка образа ОС..."}
+                  {reinstallProgress >= 50 && reinstallProgress < 80 && "Установка системы..."}
+                  {reinstallProgress >= 80 && "Настройка конфигурации..."}
+                </div>
+              </div>
+            )}
+
+            {reinstallDone && !reinstalling && (
+              <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm font-semibold animate-fade-in">
+                <Icon name="CheckCircle" size={16} /> Система успешно переустановлена!
+              </div>
+            )}
+
+            {!reinstalling && !confirmReinstall && !reinstallDone && (
               <button onClick={() => setConfirmReinstall(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-medium hover:bg-red-100 transition-colors">
                 <Icon name="Trash2" size={14} /> Переустановить систему
               </button>
-            ) : (
+            )}
+
+            {!reinstalling && reinstallDone && (
+              <button onClick={() => { setReinstallDone(false); setConfirmReinstall(false); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-medium hover:bg-red-100 transition-colors mt-2">
+                <Icon name="Trash2" size={14} /> Переустановить снова
+              </button>
+            )}
+
+            {!reinstalling && confirmReinstall && (
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-sm text-red-600 font-medium">Все данные будут удалены. Продолжить?</span>
-                <button onClick={() => { onReinstall(selectedOs); setConfirmReinstall(false); }}
+                <button onClick={handleStartReinstall}
                   className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold hover:opacity-90">
                   Да, переустановить
                 </button>
